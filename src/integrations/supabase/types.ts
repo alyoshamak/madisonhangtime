@@ -14,7 +14,63 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      ai_summary_cache: {
+        Row: {
+          id: number
+          member_count: number
+          summary: string | null
+          top_recommendation: string | null
+          unique_pick: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          member_count?: number
+          summary?: string | null
+          top_recommendation?: string | null
+          unique_pick?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          member_count?: number
+          summary?: string | null
+          top_recommendation?: string | null
+          unique_pick?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      members: {
+        Row: {
+          activities: Json
+          created_at: string
+          id: string
+          name: string
+          raw_transcript: string | null
+          unavailable_ranges: Json
+          updated_at: string
+        }
+        Insert: {
+          activities?: Json
+          created_at?: string
+          id?: string
+          name: string
+          raw_transcript?: string | null
+          unavailable_ranges?: Json
+          updated_at?: string
+        }
+        Update: {
+          activities?: Json
+          created_at?: string
+          id?: string
+          name?: string
+          raw_transcript?: string | null
+          unavailable_ranges?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
