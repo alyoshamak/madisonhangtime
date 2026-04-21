@@ -40,8 +40,39 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Single call: gemini handles audio inline and we use tool calling for structured extraction.
-    const systemPrompt = `You extract scheduling info from a friend's voice note.
+    // If this is an update for a known member, load their current record so the AI can do partial updates.
+    let existingMember:
+      | { id: string; name: string; unavailable_ranges: any; activities: any }
+      | null = null;
+    if (claimMemberId) {
+      const { data } = await supabase
+        .from("members")
+        .select("id, name, unavailable_ranges, activities")
+        .eq("id", claimMemberId)
+        .maybeSingle();
+      if (data) existingMember = data as any;
+    }
+
+    const isUpdate = !!existingMember;
+
+    const systemPrompt = isUpdate
+      ? `You are updating an existing friend's scheduling record from a short voice note.
+Today is ${fmt(today)}. Planning window runs through ${fmt(sixMonthsOut)} (~6 months).
+
+The existing record is:
+- name: "${existingMember!.name}"
+- unavailable_ranges: ${JSON.stringify(existingMember!.unavailable_ranges)}
+- activities: ${JSON.stringify(existingMember!.activities)}
+
+The speaker is THIS SAME PERSON updating their own info. They may:
+- Correct the spelling/form of their name (e.g. "my name is actually spelled Madyson, not Madison"). If so, set name_update to the corrected name.
+- Add, remove, or change unavailable date ranges. If they mention any unavailable dates, set unavailable_ranges_update to the COMPLETE new list (replacing the old list). If they don't mention dates at all, leave unavailable_ranges_update null.
+- Change activity preferences. If they mention activities, set activities_update to the COMPLETE new list. If they don't mention activities, leave activities_update null.
+
+Only set the fields the speaker actually addressed — leave the rest null so existing data is preserved.
+Convert relative dates ("next weekend", "Christmas week", "all of August") to concrete YYYY-MM-DD start/end within the window.
+Always call the record_update tool exactly once.`
+      : `You extract scheduling info from a friend's voice note.
 Today is ${fmt(today)}. The planning window runs through ${fmt(sixMonthsOut)} (~6 months).
 The speaker will state: their name, stretches of days they are NOT available within this 6-month window, and activities they would enjoy doing with friends.
 Convert any relative dates (e.g. "next weekend", "the second week of June", "Christmas week", "all of August") into concrete YYYY-MM-DD start/end dates within the window. If a year isn't given, infer the nearest future occurrence within the window.
@@ -49,42 +80,78 @@ Each unavailable range must have inclusive start_date and end_date. Single days 
 Activities should be short noun phrases (e.g. "outdoor hikes", "pottery night", "concerts").
 Always call the record_response tool exactly once.`;
 
-    const tools = [
-      {
-        type: "function",
-        function: {
-          name: "record_response",
-          description: "Record the parsed response from the friend.",
-          parameters: {
-            type: "object",
-            properties: {
-              name: { type: "string", description: "Speaker's first name (or how they introduced themselves)." },
-              unavailable_ranges: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    start_date: { type: "string", description: "YYYY-MM-DD" },
-                    end_date: { type: "string", description: "YYYY-MM-DD" },
-                    label: { type: "string", description: "Optional human description like 'vacation' or 'work travel'." },
-                  },
-                  required: ["start_date", "end_date"],
-                  additionalProperties: false,
-                },
-              },
-              activities: {
-                type: "array",
-                items: { type: "string" },
-                description: "Short list of activities/interests mentioned.",
-              },
-              transcript: { type: "string", description: "Verbatim transcript of what they said." },
-            },
-            required: ["name", "unavailable_ranges", "activities", "transcript"],
-            additionalProperties: false,
-          },
-        },
+    const rangeItemSchema = {
+      type: "object",
+      properties: {
+        start_date: { type: "string", description: "YYYY-MM-DD" },
+        end_date: { type: "string", description: "YYYY-MM-DD" },
+        label: { type: "string", description: "Optional human description like 'vacation' or 'work travel'." },
       },
-    ];
+      required: ["start_date", "end_date"],
+      additionalProperties: false,
+    };
+
+    const tools = isUpdate
+      ? [
+          {
+            type: "function",
+            function: {
+              name: "record_update",
+              description: "Apply a partial update to the existing member record. Leave fields null when the speaker did not address them.",
+              parameters: {
+                type: "object",
+                properties: {
+                  name_update: {
+                    type: ["string", "null"],
+                    description: "New/corrected name if the speaker asked to fix or change it. Otherwise null.",
+                  },
+                  unavailable_ranges_update: {
+                    type: ["array", "null"],
+                    items: rangeItemSchema,
+                    description: "Complete new list of unavailable ranges if the speaker discussed dates. Null if dates not mentioned.",
+                  },
+                  activities_update: {
+                    type: ["array", "null"],
+                    items: { type: "string" },
+                    description: "Complete new list of activities if the speaker discussed them. Null if activities not mentioned.",
+                  },
+                  transcript: { type: "string", description: "Verbatim transcript of what they said." },
+                },
+                required: ["transcript"],
+                additionalProperties: false,
+              },
+            },
+          },
+        ]
+      : [
+          {
+            type: "function",
+            function: {
+              name: "record_response",
+              description: "Record the parsed response from the friend.",
+              parameters: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Speaker's first name (or how they introduced themselves)." },
+                  unavailable_ranges: {
+                    type: "array",
+                    items: rangeItemSchema,
+                  },
+                  activities: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Short list of activities/interests mentioned.",
+                  },
+                  transcript: { type: "string", description: "Verbatim transcript of what they said." },
+                },
+                required: ["name", "unavailable_ranges", "activities", "transcript"],
+                additionalProperties: false,
+              },
+            },
+          },
+        ];
+
+    const toolName = isUpdate ? "record_update" : "record_response";
 
     const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -99,7 +166,7 @@ Always call the record_response tool exactly once.`;
           {
             role: "user",
             content: [
-              { type: "text", text: "Here is the voice note. Extract the structured response." },
+              { type: "text", text: isUpdate ? "Here is the update voice note. Apply only what they actually said." : "Here is the voice note. Extract the structured response." },
               {
                 type: "input_audio",
                 input_audio: {
@@ -111,7 +178,7 @@ Always call the record_response tool exactly once.`;
           },
         ],
         tools,
-        tool_choice: { type: "function", function: { name: "record_response" } },
+        tool_choice: { type: "function", function: { name: toolName } },
       }),
     });
 
@@ -142,6 +209,57 @@ Always call the record_response tool exactly once.`;
       });
     }
     const args = JSON.parse(toolCall.function.arguments);
+
+    // ---------- UPDATE PATH (existing identified member) ----------
+    if (isUpdate) {
+      const patch: any = { updated_at: new Date().toISOString() };
+      if (args.transcript) patch.raw_transcript = args.transcript;
+
+      if (typeof args.name_update === "string" && args.name_update.trim()) {
+        patch.name = args.name_update.trim();
+      }
+      if (Array.isArray(args.unavailable_ranges_update)) {
+        patch.unavailable_ranges = args.unavailable_ranges_update
+          .map((r: any) => (r?.start_date && r?.end_date ? { start_date: r.start_date, end_date: r.end_date, label: r.label ?? null } : null))
+          .filter(Boolean);
+      }
+      if (Array.isArray(args.activities_update)) {
+        patch.activities = args.activities_update.map((a: string) => String(a).trim()).filter(Boolean);
+      }
+
+      const { error } = await supabase.from("members").update(patch).eq("id", existingMember!.id);
+      if (error) {
+        console.error("Update failed", error);
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Refresh summary in background
+      (async () => {
+        try {
+          await fetch(`${SUPABASE_URL}/functions/v1/refresh-summary`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+            body: JSON.stringify({ password: GROUP_PASSWORD }),
+          });
+        } catch (e) { console.error("summary refresh failed", e); }
+      })();
+
+      const finalName = patch.name ?? existingMember!.name;
+      return new Response(JSON.stringify({
+        ok: true,
+        memberId: existingMember!.id,
+        name: finalName,
+        updated_fields: {
+          name: !!patch.name,
+          unavailable_ranges: !!patch.unavailable_ranges,
+          activities: !!patch.activities,
+        },
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ---------- NEW SUBMISSION PATH ----------
     const name = (args.name ?? "").trim();
     if (!name) {
       return new Response(JSON.stringify({ error: "Couldn't catch a name in the recording." }), {
@@ -149,16 +267,9 @@ Always call the record_response tool exactly once.`;
       });
     }
 
-    // Clamp ranges to window
     const ranges = (args.unavailable_ranges ?? [])
-      .map((r: any) => {
-        const s = r.start_date;
-        const e = r.end_date;
-        if (!s || !e) return null;
-        return { start_date: s, end_date: e, label: r.label ?? null };
-      })
+      .map((r: any) => (r?.start_date && r?.end_date ? { start_date: r.start_date, end_date: r.end_date, label: r.label ?? null } : null))
       .filter(Boolean);
-
     const activities = (args.activities ?? []).map((a: string) => String(a).trim()).filter(Boolean);
 
     const payload: any = {
@@ -169,45 +280,35 @@ Always call the record_response tool exactly once.`;
       updated_at: new Date().toISOString(),
     };
 
-    let memberId = claimMemberId as string | undefined;
+    let memberId: string | undefined;
 
-    if (memberId) {
+    // Upsert by case-insensitive name
+    const { data: existing } = await supabase
+      .from("members")
+      .select("id")
+      .ilike("name", name)
+      .maybeSingle();
+
+    if (existing?.id) {
+      memberId = existing.id;
       const { error } = await supabase.from("members").update(payload).eq("id", memberId);
       if (error) {
-        console.error("Update by id failed", error);
         return new Response(JSON.stringify({ error: error.message }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     } else {
-      // Upsert by case-insensitive name
-      const { data: existing } = await supabase
+      const { data, error } = await supabase
         .from("members")
+        .insert(payload)
         .select("id")
-        .ilike("name", name)
-        .maybeSingle();
-
-      if (existing?.id) {
-        memberId = existing.id;
-        const { error } = await supabase.from("members").update(payload).eq("id", memberId);
-        if (error) {
-          return new Response(JSON.stringify({ error: error.message }), {
-            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      } else {
-        const { data, error } = await supabase
-          .from("members")
-          .insert(payload)
-          .select("id")
-          .single();
-        if (error) {
-          return new Response(JSON.stringify({ error: error.message }), {
-            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        memberId = data.id;
+        .single();
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
+      memberId = data.id;
     }
 
     // Fire-and-forget: refresh AI summary
@@ -215,15 +316,10 @@ Always call the record_response tool exactly once.`;
       try {
         await fetch(`${SUPABASE_URL}/functions/v1/refresh-summary`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           body: JSON.stringify({ password: GROUP_PASSWORD }),
         });
-      } catch (e) {
-        console.error("summary refresh failed", e);
-      }
+      } catch (e) { console.error("summary refresh failed", e); }
     })();
 
     return new Response(JSON.stringify({
@@ -232,9 +328,7 @@ Always call the record_response tool exactly once.`;
       name,
       unavailable_ranges: ranges,
       activities,
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("submit-voice error", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
