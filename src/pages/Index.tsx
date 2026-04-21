@@ -1,16 +1,59 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useEffect, useState } from "react";
+import { PasswordGate } from "@/components/PasswordGate";
+import { Onboarding } from "@/components/Onboarding";
+import { Dashboard } from "@/components/Dashboard";
+import { session } from "@/lib/session";
+import { supabase } from "@/integrations/supabase/client";
 
-// IMPORTANT: Fully REPLACE this with your own code
-const PlaceholderIndex = () => {
-  // PLACEHOLDER: Replace this entire return statement with the user's app.
-  // The inline background color is intentionally not part of the design system.
+type Stage = "loading" | "gate" | "onboarding" | "dashboard";
+
+const Index = () => {
+  const [stage, setStage] = useState<Stage>("loading");
+
+  useEffect(() => {
+    const init = async () => {
+      const pw = session.getPassword();
+      if (!pw) {
+        setStage("gate");
+        return;
+      }
+      // If they have a password but no claimed identity, check whether anyone has submitted yet.
+      const memberId = session.getMemberId();
+      if (memberId) {
+        // Verify the member still exists
+        const { data } = await supabase.from("members").select("id").eq("id", memberId).maybeSingle();
+        if (data) {
+          setStage("dashboard");
+          return;
+        }
+        session.clearMember();
+      }
+      // No identity yet — show onboarding only if they're literally the first / haven't submitted.
+      // But others may have already submitted, so still go to dashboard with "claim" flow available.
+      const { count } = await supabase.from("members").select("*", { count: "exact", head: true });
+      setStage((count ?? 0) === 0 ? "onboarding" : "dashboard");
+    };
+    init();
+  }, []);
+
+  if (stage === "loading") {
+    return <main className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">Loading…</main>;
+  }
+  if (stage === "gate") {
+    return <PasswordGate onUnlock={async () => {
+      const { count } = await supabase.from("members").select("*", { count: "exact", head: true });
+      setStage((count ?? 0) === 0 ? "onboarding" : "dashboard");
+    }} />;
+  }
+  if (stage === "onboarding") {
+    return <Onboarding onDone={() => setStage("dashboard")} />;
+  }
   return (
-    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: '#fcfbf8' }}>
-      <img data-lovable-blank-page-placeholder="REMOVE_THIS" src="/placeholder.svg" alt="Your app will live here!" />
-    </div>
+    <Dashboard
+      onSignOut={() => setStage("gate")}
+      onAddNew={() => setStage("onboarding")}
+    />
   );
 };
-
-const Index = PlaceholderIndex;
 
 export default Index;
