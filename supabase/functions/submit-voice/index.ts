@@ -11,12 +11,154 @@ const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GROUP_PASSWORD = Deno.env.get("GROUP_PASSWORD")!;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const today = new Date();
 const sixMonthsOut = new Date(today);
 sixMonthsOut.setMonth(today.getMonth() + 6);
 
 const fmt = (d: Date) => d.toISOString().slice(0, 10);
+const windowStart = fmt(today);
+const windowEnd = fmt(sixMonthsOut);
+
+type UnavailableRange = {
+  start_date: string;
+  end_date: string;
+  label: string | null;
+};
+
+const parseDay = (value: string) => {
+  const [year, month, day] = value.split("-").map(Number);
+  return Date.UTC(year, month - 1, day);
+};
+
+const formatDay = (value: number) => new Date(value).toISOString().slice(0, 10);
+
+const sanitizeRange = (input: any): UnavailableRange | null => {
+  if (!input?.start_date || !input?.end_date) return null;
+
+  let start = parseDay(String(input.start_date));
+  let end = parseDay(String(input.end_date));
+  if (Number.isNaN(start) || Number.isNaN(end)) return null;
+  if (end < start) [start, end] = [end, start];
+
+  const clampedStart = Math.max(start, parseDay(windowStart));
+  const clampedEnd = Math.min(end, parseDay(windowEnd));
+  if (clampedEnd < clampedStart) return null;
+
+  return {
+    start_date: formatDay(clampedStart),
+    end_date: formatDay(clampedEnd),
+    label: typeof input.label === "string" && input.label.trim() ? input.label.trim() : null,
+  };
+};
+
+const mergeRanges = (ranges: UnavailableRange[]) => {
+  if (!ranges.length) return [];
+
+  const sorted = [...ranges].sort((a, b) => parseDay(a.start_date) - parseDay(b.start_date));
+  const merged: UnavailableRange[] = [sorted[0]];
+
+  for (const next of sorted.slice(1)) {
+    const current = merged[merged.length - 1];
+    const currentEnd = parseDay(current.end_date);
+    const nextStart = parseDay(next.start_date);
+    const nextEnd = parseDay(next.end_date);
+
+    if (nextStart <= currentEnd + DAY_MS) {
+      current.end_date = formatDay(Math.max(currentEnd, nextEnd));
+      current.label = current.label ?? next.label;
+    } else {
+      merged.push({ ...next });
+    }
+  }
+
+  return merged;
+};
+
+const subtractRange = (source: UnavailableRange, removal: UnavailableRange) => {
+  const sourceStart = parseDay(source.start_date);
+  const sourceEnd = parseDay(source.end_date);
+  const removalStart = parseDay(removal.start_date);
+  const removalEnd = parseDay(removal.end_date);
+
+  if (removalEnd < sourceStart || removalStart > sourceEnd) {
+    return [source];
+  }
+
+  const result: UnavailableRange[] = [];
+
+  if (removalStart > sourceStart) {
+    result.push({
+      start_date: formatDay(sourceStart),
+      end_date: formatDay(removalStart - DAY_MS),
+      label: source.label,
+    });
+  }
+
+  if (removalEnd < sourceEnd) {
+    result.push({
+      start_date: formatDay(removalEnd + DAY_MS),
+      end_date: formatDay(sourceEnd),
+      label: source.label,
+    });
+  }
+
+  return result;
+};
+
+const normalizeExistingRanges = (ranges: any) =>
+  mergeRanges(
+    (Array.isArray(ranges) ? ranges : [])
+      .map((range) => sanitizeRange(range))
+      .filter((range): range is UnavailableRange => !!range),
+  );
+
+const applyAvailabilityChanges = (existingRanges: any, changes: any[]) => {
+  let next = normalizeExistingRanges(existingRanges);
+
+  for (const change of Array.isArray(changes) ? changes : []) {
+    const normalized = sanitizeRange(change);
+    if (!normalized) continue;
+
+    if (change.action === "remove_unavailable") {
+      next = next.flatMap((range) => subtractRange(range, normalized));
+      continue;
+    }
+
+    if (change.action === "add_unavailable") {
+      next = mergeRanges([...next, normalized]);
+    }
+  }
+
+  return mergeRanges(next);
+};
+
+const applyActivityChanges = (existingActivities: any, changes: any[]) => {
+  const next = new Map<string, string>();
+
+  for (const activity of Array.isArray(existingActivities) ? existingActivities : []) {
+    const normalized = String(activity).trim();
+    if (!normalized) continue;
+    next.set(normalized.toLowerCase(), normalized);
+  }
+
+  for (const change of Array.isArray(changes) ? changes : []) {
+    const activity = String(change?.activity ?? "").trim();
+    if (!activity) continue;
+
+    if (change.action === "remove") {
+      next.delete(activity.toLowerCase());
+      continue;
+    }
+
+    if (change.action === "add") {
+      next.set(activity.toLowerCase(), activity);
+    }
+  }
+
+  return [...next.values()];
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -40,7 +182,6 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // If this is an update for a known member, load their current record so the AI can do partial updates.
     let existingMember:
       | { id: string; name: string; unavailable_ranges: any; activities: any }
       | null = null;
@@ -57,23 +198,30 @@ Deno.serve(async (req) => {
 
     const systemPrompt = isUpdate
       ? `You are updating an existing friend's scheduling record from a short voice note.
-Today is ${fmt(today)}. Planning window runs through ${fmt(sixMonthsOut)} (~6 months).
+Today is ${windowStart}. The planning window runs through ${windowEnd}.
 
-The existing record is:
-- name: "${existingMember!.name}"
+Current record:
+- name: ${JSON.stringify(existingMember!.name)}
 - unavailable_ranges: ${JSON.stringify(existingMember!.unavailable_ranges)}
 - activities: ${JSON.stringify(existingMember!.activities)}
 
-The speaker is THIS SAME PERSON updating their own info. They may:
-- Correct the spelling/form of their name (e.g. "my name is actually spelled Madyson, not Madison"). If so, set name_update to the corrected name.
-- Add, remove, or change unavailable date ranges. If they mention any unavailable dates, set unavailable_ranges_update to the COMPLETE new list (replacing the old list). If they don't mention dates at all, leave unavailable_ranges_update null.
-- Change activity preferences. If they mention activities, set activities_update to the COMPLETE new list. If they don't mention activities, leave activities_update null.
+This speaker is the SAME person. Keep their existing name unless they explicitly correct the spelling or format of their name.
+Do not replace their whole record. Preserve all existing data unless the speaker explicitly changes it.
 
-Only set the fields the speaker actually addressed — leave the rest null so existing data is preserved.
-Convert relative dates ("next weekend", "Christmas week", "all of August") to concrete YYYY-MM-DD start/end within the window.
+For availability:
+- If they say they are busy, unavailable, away, traveling, or cannot make a date range, return an availability_changes item with action "add_unavailable".
+- If they say they are now free, available, can make a date that was previously blocked, or want to remove a prior conflict, return an item with action "remove_unavailable".
+- Only include the date ranges they explicitly changed in this update.
+
+For activities:
+- If they add a new preference, use action "add".
+- If they say they no longer want an activity, use action "remove".
+- Only include activity changes they explicitly said.
+
+Convert relative dates into concrete YYYY-MM-DD ranges inside the planning window.
 Always call the record_update tool exactly once.`
       : `You extract scheduling info from a friend's voice note.
-Today is ${fmt(today)}. The planning window runs through ${fmt(sixMonthsOut)} (~6 months).
+Today is ${windowStart}. The planning window runs through ${windowEnd} (~6 months).
 The speaker will state: their name, stretches of days they are NOT available within this 6-month window, and activities they would enjoy doing with friends.
 Convert any relative dates (e.g. "next weekend", "the second week of June", "Christmas week", "all of August") into concrete YYYY-MM-DD start/end dates within the window. If a year isn't given, infer the nearest future occurrence within the window.
 Each unavailable range must have inclusive start_date and end_date. Single days have start_date == end_date.
@@ -97,27 +245,48 @@ Always call the record_response tool exactly once.`;
             type: "function",
             function: {
               name: "record_update",
-              description: "Apply a partial update to the existing member record. Leave fields null when the speaker did not address them.",
+              description: "Patch the existing member record while preserving any fields the speaker did not change.",
               parameters: {
                 type: "object",
                 properties: {
                   name_update: {
-                    type: ["string", "null"],
-                    description: "New/corrected name if the speaker asked to fix or change it. Otherwise null.",
+                    type: "string",
+                    description: "Corrected name only if the speaker explicitly changed it. Otherwise return an empty string.",
                   },
-                  unavailable_ranges_update: {
-                    type: ["array", "null"],
-                    items: rangeItemSchema,
-                    description: "Complete new list of unavailable ranges if the speaker discussed dates. Null if dates not mentioned.",
+                  availability_changes: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        action: {
+                          type: "string",
+                          enum: ["add_unavailable", "remove_unavailable"],
+                        },
+                        start_date: { type: "string", description: "YYYY-MM-DD" },
+                        end_date: { type: "string", description: "YYYY-MM-DD" },
+                        label: { type: "string", description: "Optional context like vacation or work trip." },
+                      },
+                      required: ["action", "start_date", "end_date"],
+                      additionalProperties: false,
+                    },
+                    description: "Only the unavailable/available date ranges the speaker changed in this update.",
                   },
-                  activities_update: {
-                    type: ["array", "null"],
-                    items: { type: "string" },
-                    description: "Complete new list of activities if the speaker discussed them. Null if activities not mentioned.",
+                  activity_changes: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        action: { type: "string", enum: ["add", "remove"] },
+                        activity: { type: "string" },
+                      },
+                      required: ["action", "activity"],
+                      additionalProperties: false,
+                    },
+                    description: "Only the activity preference changes explicitly requested in this update.",
                   },
                   transcript: { type: "string", description: "Verbatim transcript of what they said." },
                 },
-                required: ["transcript"],
+                required: ["name_update", "availability_changes", "activity_changes", "transcript"],
                 additionalProperties: false,
               },
             },
@@ -166,7 +335,12 @@ Always call the record_response tool exactly once.`;
           {
             role: "user",
             content: [
-              { type: "text", text: isUpdate ? "Here is the update voice note. Apply only what they actually said." : "Here is the voice note. Extract the structured response." },
+              {
+                type: "text",
+                text: isUpdate
+                  ? "Here is the update voice note. Only change the parts of the record the speaker explicitly changed."
+                  : "Here is the voice note. Extract the structured response.",
+              },
               {
                 type: "input_audio",
                 input_audio: {
@@ -187,16 +361,19 @@ Always call the record_response tool exactly once.`;
       console.error("AI error", aiResp.status, t);
       if (aiResp.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit hit, please try again in a moment." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       if (aiResp.status === 402) {
         return new Response(JSON.stringify({ error: "AI credits exhausted. Add funds in Settings → Workspace → Usage." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 402,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       return new Response(JSON.stringify({ error: "AI extraction failed" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -205,74 +382,91 @@ Always call the record_response tool exactly once.`;
     if (!toolCall) {
       console.error("No tool call in AI response", JSON.stringify(aiJson));
       return new Response(JSON.stringify({ error: "Could not understand the recording. Try again." }), {
-        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 422,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
     const args = JSON.parse(toolCall.function.arguments);
 
-    // ---------- UPDATE PATH (existing identified member) ----------
     if (isUpdate) {
-      const patch: any = { updated_at: new Date().toISOString() };
-      if (args.transcript) patch.raw_transcript = args.transcript;
+      const patch: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+        raw_transcript: args.transcript ?? null,
+      };
 
-      if (typeof args.name_update === "string" && args.name_update.trim()) {
-        patch.name = args.name_update.trim();
+      const nextName = String(args.name_update ?? "").trim();
+      if (nextName) {
+        patch.name = nextName;
       }
-      if (Array.isArray(args.unavailable_ranges_update)) {
-        patch.unavailable_ranges = args.unavailable_ranges_update
-          .map((r: any) => (r?.start_date && r?.end_date ? { start_date: r.start_date, end_date: r.end_date, label: r.label ?? null } : null))
-          .filter(Boolean);
+
+      const availabilityChanges = Array.isArray(args.availability_changes) ? args.availability_changes : [];
+      if (availabilityChanges.length > 0) {
+        patch.unavailable_ranges = applyAvailabilityChanges(existingMember!.unavailable_ranges, availabilityChanges);
       }
-      if (Array.isArray(args.activities_update)) {
-        patch.activities = args.activities_update.map((a: string) => String(a).trim()).filter(Boolean);
+
+      const activityChanges = Array.isArray(args.activity_changes) ? args.activity_changes : [];
+      if (activityChanges.length > 0) {
+        patch.activities = applyActivityChanges(existingMember!.activities, activityChanges);
       }
 
       const { error } = await supabase.from("members").update(patch).eq("id", existingMember!.id);
       if (error) {
         console.error("Update failed", error);
         return new Response(JSON.stringify({ error: error.message }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // Refresh summary in background
       (async () => {
         try {
           await fetch(`${SUPABASE_URL}/functions/v1/refresh-summary`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            },
             body: JSON.stringify({ password: GROUP_PASSWORD }),
           });
-        } catch (e) { console.error("summary refresh failed", e); }
+        } catch (e) {
+          console.error("summary refresh failed", e);
+        }
       })();
 
-      const finalName = patch.name ?? existingMember!.name;
-      return new Response(JSON.stringify({
-        ok: true,
-        memberId: existingMember!.id,
-        name: finalName,
-        updated_fields: {
-          name: !!patch.name,
-          unavailable_ranges: !!patch.unavailable_ranges,
-          activities: !!patch.activities,
-        },
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          memberId: existingMember!.id,
+          name: (patch.name as string | undefined) ?? existingMember!.name,
+          updated_fields: {
+            name: !!patch.name,
+            unavailable_ranges: Object.prototype.hasOwnProperty.call(patch, "unavailable_ranges"),
+            activities: Object.prototype.hasOwnProperty.call(patch, "activities"),
+          },
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
-    // ---------- NEW SUBMISSION PATH ----------
-    const name = (args.name ?? "").trim();
+    const name = String(args.name ?? "").trim();
     if (!name) {
       return new Response(JSON.stringify({ error: "Couldn't catch a name in the recording." }), {
-        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 422,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const ranges = (args.unavailable_ranges ?? [])
-      .map((r: any) => (r?.start_date && r?.end_date ? { start_date: r.start_date, end_date: r.end_date, label: r.label ?? null } : null))
+    const ranges = mergeRanges(
+      (Array.isArray(args.unavailable_ranges) ? args.unavailable_ranges : [])
+        .map((range) => sanitizeRange(range))
+        .filter((range): range is UnavailableRange => !!range),
+    );
+    const activities = (Array.isArray(args.activities) ? args.activities : [])
+      .map((activity: string) => String(activity).trim())
       .filter(Boolean);
-    const activities = (args.activities ?? []).map((a: string) => String(a).trim()).filter(Boolean);
 
-    const payload: any = {
+    const payload = {
       name,
       unavailable_ranges: ranges,
       activities,
@@ -282,7 +476,6 @@ Always call the record_response tool exactly once.`;
 
     let memberId: string | undefined;
 
-    // Upsert by case-insensitive name
     const { data: existing } = await supabase
       .from("members")
       .select("id")
@@ -294,45 +487,51 @@ Always call the record_response tool exactly once.`;
       const { error } = await supabase.from("members").update(payload).eq("id", memberId);
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     } else {
-      const { data, error } = await supabase
-        .from("members")
-        .insert(payload)
-        .select("id")
-        .single();
+      const { data, error } = await supabase.from("members").insert(payload).select("id").single();
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       memberId = data.id;
     }
 
-    // Fire-and-forget: refresh AI summary
     (async () => {
       try {
         await fetch(`${SUPABASE_URL}/functions/v1/refresh-summary`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          },
           body: JSON.stringify({ password: GROUP_PASSWORD }),
         });
-      } catch (e) { console.error("summary refresh failed", e); }
+      } catch (e) {
+        console.error("summary refresh failed", e);
+      }
     })();
 
-    return new Response(JSON.stringify({
-      ok: true,
-      memberId,
-      name,
-      unavailable_ranges: ranges,
-      activities,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        memberId,
+        name,
+        unavailable_ranges: ranges,
+        activities,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   } catch (e) {
     console.error("submit-voice error", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
