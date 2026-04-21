@@ -18,7 +18,10 @@ export const Onboarding = ({ onDone }: { onDone: () => void }) => {
           </li>
           <li className="flex gap-3">
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">2</span>
-            <span className="text-foreground">The stretches of days you are <em>not</em> available over the next 6 months</span>
+            <span className="text-foreground">
+              The stretches of days you are <strong className="font-bold text-primary uppercase tracking-wide">not</strong> available over the next 6 months
+              <span className="block text-sm text-muted-foreground mt-1">You can edit this later on.</span>
+            </span>
           </li>
           <li className="flex gap-3">
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">3</span>
