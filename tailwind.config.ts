@@ -57,6 +57,21 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        avail: {
+          free: "hsl(var(--avail-free))",
+          busy: "hsl(var(--avail-busy))",
+          empty: "hsl(var(--avail-empty))",
+          overlap: "hsl(var(--avail-overlap))",
+          "overlap-glow": "hsl(var(--avail-overlap-glow))",
+        },
+      },
+      fontFamily: {
+        serif: ['Fraunces', 'ui-serif', 'Georgia', 'serif'],
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      },
+      boxShadow: {
+        soft: 'var(--shadow-soft)',
+        gold: 'var(--shadow-gold)',
       },
       borderRadius: {
         lg: "var(--radius)",
