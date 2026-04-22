@@ -15,7 +15,7 @@ type Props = {
   onSignOut: () => void;
 };
 
-export const Dashboard = ({ onSignOut, onAddNew }: Props) => {
+export const Dashboard = ({ onSignOut }: Props) => {
   const [members, setMembers] = useState<Member[]>([]);
   const [summary, setSummary] = useState<AiSummary | null>(null);
   const [loading, setLoading] = useState(true);
