@@ -539,7 +539,8 @@ Always call the record_response tool exactly once.`;
       JSON.stringify({
         ok: true,
         memberId,
-        name,
+        name: finalName,
+        merged_with_existing: !!matchedMember,
         unavailable_ranges: ranges,
         activities,
       }),
