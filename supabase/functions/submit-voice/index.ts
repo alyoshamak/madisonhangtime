@@ -597,30 +597,138 @@ Always call the record_response tool exactly once.`;
     let finalName = name;
 
     if (matchedMember) {
-      // Treat as an update to the existing person — preserve prior data, keep their stored name.
+      // Re-process the same audio through the UPDATE prompt so the speaker can
+      // also remove dates / activities — not just add. Handles returning users
+      // on a fresh device who never claimed their identity locally.
       memberId = matchedMember.id;
       finalName = matchedMember.name;
-      const mergedUnavailable = mergeRanges([
-        ...normalizeExistingRanges(matchedMember.unavailable_ranges),
-        ...ranges,
-      ]);
-      const mergedActivities = applyActivityChanges(
-        matchedMember.activities,
-        activities.map((activity) => ({ action: "add", activity })),
+
+      const updatePrompt = `You are updating an existing friend's scheduling record from a short voice note.
+Today is ${windowStart}. The planning window runs through ${windowEnd}.
+
+Current record:
+- name: ${JSON.stringify(matchedMember.name)}
+- unavailable_ranges: ${JSON.stringify(matchedMember.unavailable_ranges)}
+- activities: ${JSON.stringify(matchedMember.activities)}
+
+This speaker is the SAME person. Keep their existing name unless they explicitly correct the spelling or format of their name.
+Do not replace their whole record. Preserve all existing data unless the speaker explicitly changes it.
+
+For availability:
+- If they say they are busy, unavailable, away, traveling, or cannot make a date range, return an availability_changes item with action "add_unavailable".
+- If they say they are now free, available, can make a date that was previously blocked, or want to remove a prior conflict, return an item with action "remove_unavailable".
+- Only include the date ranges they explicitly changed in this update.
+
+For activities:
+- If they add a new preference, use action "add".
+- If they say they no longer want an activity, use action "remove".
+- Only include activity changes they explicitly said.
+
+Convert relative dates into concrete YYYY-MM-DD ranges inside the planning window.
+Always call the record_update tool exactly once.`;
+
+      const updateTools = [
+        {
+          type: "function",
+          function: {
+            name: "record_update",
+            description: "Patch the existing member record while preserving any fields the speaker did not change.",
+            parameters: {
+              type: "object",
+              properties: {
+                name_update: { type: "string", description: "Only if the speaker explicitly changed their name. Otherwise empty string." },
+                availability_changes: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      action: { type: "string", enum: ["add_unavailable", "remove_unavailable"] },
+                      start_date: { type: "string" },
+                      end_date: { type: "string" },
+                      label: { type: "string" },
+                    },
+                    required: ["action", "start_date", "end_date"],
+                    additionalProperties: false,
+                  },
+                },
+                activity_changes: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      action: { type: "string", enum: ["add", "remove"] },
+                      activity: { type: "string" },
+                    },
+                    required: ["action", "activity"],
+                    additionalProperties: false,
+                  },
+                },
+                transcript: { type: "string" },
+              },
+              required: ["name_update", "availability_changes", "activity_changes", "transcript"],
+              additionalProperties: false,
+            },
+          },
+        },
+      ];
+
+      const updateResp = await callAi(
+        updatePrompt,
+        updateTools,
+        "record_update",
+        "Here is the update voice note. Only change the parts of the record the speaker explicitly changed.",
       );
-      const updatePayload = {
-        unavailable_ranges: mergedUnavailable,
-        activities: mergedActivities,
-        raw_transcript: args.transcript ?? null,
+
+      let updateArgs: any = null;
+      if (updateResp.ok) {
+        const updateJson = await updateResp.json();
+        const updateCall = updateJson.choices?.[0]?.message?.tool_calls?.[0];
+        if (updateCall) {
+          try { updateArgs = JSON.parse(updateCall.function.arguments); } catch { /* fall through */ }
+        }
+      } else {
+        console.error("update-mode AI call failed", updateResp.status, await updateResp.text());
+      }
+
+      const patch: Record<string, unknown> = {
+        raw_transcript: (updateArgs?.transcript ?? args.transcript) ?? null,
         updated_at: new Date().toISOString(),
       };
-      const { error } = await supabase.from("members").update(updatePayload).eq("id", memberId);
+
+      if (updateArgs) {
+        const nextName = String(updateArgs.name_update ?? "").trim();
+        if (nextName) patch.name = nextName;
+
+        const availabilityChanges = Array.isArray(updateArgs.availability_changes) ? updateArgs.availability_changes : [];
+        if (availabilityChanges.length > 0) {
+          patch.unavailable_ranges = applyAvailabilityChanges(matchedMember.unavailable_ranges, availabilityChanges);
+        }
+        const activityChanges = Array.isArray(updateArgs.activity_changes) ? updateArgs.activity_changes : [];
+        if (activityChanges.length > 0) {
+          patch.activities = applyActivityChanges(matchedMember.activities, activityChanges);
+        }
+      } else {
+        // Fallback: additive merge so we never lose the user's submission.
+        patch.unavailable_ranges = mergeRanges([
+          ...normalizeExistingRanges(matchedMember.unavailable_ranges),
+          ...ranges,
+        ]);
+        patch.activities = applyActivityChanges(
+          matchedMember.activities,
+          activities.map((activity) => ({ action: "add", activity })),
+        );
+      }
+
+      if (patch.name) finalName = patch.name as string;
+
+      const { error } = await supabase.from("members").update(patch).eq("id", memberId);
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+    }
     } else {
       const insertPayload = {
         name,
