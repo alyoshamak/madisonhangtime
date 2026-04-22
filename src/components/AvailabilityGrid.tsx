@@ -150,12 +150,11 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                     <Tooltip key={key}>
                       <TooltipTrigger asChild>
                         <div
-                          className="absolute top-0 gold-bar rounded-sm pointer-events-auto cursor-help"
+                          className="absolute top-0 gold-bar pointer-events-auto cursor-help"
                           style={{
-                            left: idx * DAY_WIDTH + 1,
-                            width: DAY_WIDTH - 2,
+                            left: idx * DAY_WIDTH,
+                            width: DAY_WIDTH,
                             height: members.length * ROW_HEIGHT,
-                            opacity: 0.9,
                           }}
                           aria-label={`Everyone free — ${prettyDate(date)}`}
                         />
