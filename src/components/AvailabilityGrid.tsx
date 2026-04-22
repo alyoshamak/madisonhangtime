@@ -293,7 +293,7 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                               disabled={isPending}
                               onClick={() => toggleDay(m, d)}
                               className={cn(
-                                "border-r border-background/60 transition-opacity hover:opacity-80 cursor-pointer relative z-[6]",
+                                "border-r border-background/60 transition-opacity hover:opacity-80 cursor-pointer relative z-[1]",
                                 busy ? "bg-avail-busy" : "bg-avail-free",
                                 isWeekend && "opacity-90",
                                 isPending && "animate-pulse",
