@@ -466,25 +466,36 @@ Always call the record_response tool exactly once.`;
       .map((activity: string) => String(activity).trim())
       .filter(Boolean);
 
-    const payload = {
-      name,
-      unavailable_ranges: ranges,
-      activities,
-      raw_transcript: args.transcript ?? null,
-      updated_at: new Date().toISOString(),
-    };
+    // Load all existing members so we can match against spelling variations / nicknames
+    // and never create a duplicate row for the same person.
+    const { data: allMembers } = await supabase
+      .from("members")
+      .select("id, name, unavailable_ranges, activities");
+
+    const matchedMember = await findMatchingMember(name, allMembers ?? []);
 
     let memberId: string | undefined;
+    let finalName = name;
 
-    const { data: existing } = await supabase
-      .from("members")
-      .select("id")
-      .ilike("name", name)
-      .maybeSingle();
-
-    if (existing?.id) {
-      memberId = existing.id;
-      const { error } = await supabase.from("members").update(payload).eq("id", memberId);
+    if (matchedMember) {
+      // Treat as an update to the existing person — preserve prior data, keep their stored name.
+      memberId = matchedMember.id;
+      finalName = matchedMember.name;
+      const mergedUnavailable = mergeRanges([
+        ...normalizeExistingRanges(matchedMember.unavailable_ranges),
+        ...ranges,
+      ]);
+      const mergedActivities = applyActivityChanges(
+        matchedMember.activities,
+        activities.map((activity) => ({ action: "add", activity })),
+      );
+      const updatePayload = {
+        unavailable_ranges: mergedUnavailable,
+        activities: mergedActivities,
+        raw_transcript: args.transcript ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabase.from("members").update(updatePayload).eq("id", memberId);
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), {
           status: 500,
@@ -492,7 +503,14 @@ Always call the record_response tool exactly once.`;
         });
       }
     } else {
-      const { data, error } = await supabase.from("members").insert(payload).select("id").single();
+      const insertPayload = {
+        name,
+        unavailable_ranges: ranges,
+        activities,
+        raw_transcript: args.transcript ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabase.from("members").insert(insertPayload).select("id").single();
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), {
           status: 500,
