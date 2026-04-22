@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, useState } from "react";
 import {
   Tooltip,
   TooltipContent,
@@ -6,7 +6,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  addDays,
   generateDays,
   isUnavailable,
   prettyDate,
@@ -15,8 +14,11 @@ import {
   startOfDay,
   ymd,
 } from "@/lib/dates";
-import type { Member } from "@/lib/types";
+import type { Member, UnavailableRange } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { session } from "@/lib/session";
+import { toast } from "sonner";
 
 const DAY_WIDTH = 18;       // px per day cell
 const ROW_HEIGHT = 44;      // px per member row
@@ -32,16 +34,42 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
   const today = startOfDay(new Date());
   const days = useMemo(() => generateDays(today, daysCount), [today.getTime(), daysCount]);
 
+  // Local optimistic overrides for the current member's ranges, keyed by member id.
+  const [override, setOverride] = useState<Record<string, UnavailableRange[]>>({});
+  const [pendingDays, setPendingDays] = useState<Set<string>>(new Set());
+
+  // Clear override for a member when their server data changes (i.e. fresh load came in).
+  // We compare by updated_at via a stringified key.
+  useEffect(() => {
+    setOverride((prev) => {
+      if (!Object.keys(prev).length) return prev;
+      const next = { ...prev };
+      let changed = false;
+      for (const m of members) {
+        if (next[m.id]) {
+          delete next[m.id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // Only when members array reference changes (parent re-fetches via realtime)
+  }, [members]);
+
+  const effectiveRanges = (m: Member): UnavailableRange[] =>
+    override[m.id] ?? (m.unavailable_ranges as UnavailableRange[]);
+
   // For each day, true if every submitted member is available
   const overlapDays = useMemo(() => {
     if (members.length === 0) return new Set<string>();
     const out = new Set<string>();
     for (const d of days) {
-      const allFree = members.every((m) => !isUnavailable(d, m.unavailable_ranges));
+      const allFree = members.every((m) => !isUnavailable(d, effectiveRanges(m)));
       if (allFree) out.add(ymd(d));
     }
     return out;
-  }, [days, members]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days, members, override]);
 
   // Month header segments
   const monthSegments = useMemo(() => {
@@ -64,10 +92,78 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll near today on first mount (already at start, but ensure)
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollLeft = 0;
   }, []);
+
+  const toggleDay = async (member: Member, date: Date) => {
+    const password = session.getPassword();
+    if (!password) {
+      toast.error("Session expired. Please sign in again.");
+      return;
+    }
+    const dayKey = ymd(date);
+    const pendKey = `${member.id}:${dayKey}`;
+    if (pendingDays.has(pendKey)) return;
+
+    const current = effectiveRanges(member);
+    const wasBusy = isUnavailable(date, current);
+
+    // Optimistic update
+    let nextRanges: UnavailableRange[];
+    if (wasBusy) {
+      // Remove the day from any range that covers it
+      nextRanges = current.flatMap((r) => {
+        const s = r.start_date;
+        const e = r.end_date;
+        if (dayKey < s || dayKey > e) return [r];
+        const out: UnavailableRange[] = [];
+        if (s < dayKey) {
+          const prevDay = new Date(date);
+          prevDay.setDate(prevDay.getDate() - 1);
+          out.push({ start_date: s, end_date: ymd(prevDay), label: r.label ?? null });
+        }
+        if (dayKey < e) {
+          const nextDay = new Date(date);
+          nextDay.setDate(nextDay.getDate() + 1);
+          out.push({ start_date: ymd(nextDay), end_date: e, label: r.label ?? null });
+        }
+        return out;
+      });
+    } else {
+      nextRanges = [...current, { start_date: dayKey, end_date: dayKey, label: null }];
+    }
+
+    setOverride((p) => ({ ...p, [member.id]: nextRanges }));
+    setPendingDays((p) => {
+      const n = new Set(p);
+      n.add(pendKey);
+      return n;
+    });
+
+    try {
+      const { data, error } = await supabase.functions.invoke("toggle-day", {
+        body: { password, member_id: member.id, date: dayKey },
+      });
+      if (error || (data as any)?.error) {
+        throw new Error((data as any)?.error || error?.message || "Toggle failed");
+      }
+    } catch (e: any) {
+      // Revert
+      setOverride((p) => {
+        const n = { ...p };
+        delete n[member.id];
+        return n;
+      });
+      toast.error(e?.message || "Couldn't update that day.");
+    } finally {
+      setPendingDays((p) => {
+        const n = new Set(p);
+        n.delete(pendKey);
+        return n;
+      });
+    }
+  };
 
   if (members.length === 0) {
     return (
@@ -126,7 +222,6 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
               {/* Day-of-month row */}
               <div className="flex border-b border-border" style={{ height: 28 }}>
                 {days.map((d, i) => {
-                  const isToday = i === 0;
                   const isWeekend = d.getDay() === 0 || d.getDay() === 6;
                   const isOverlap = overlapDays.has(ymd(d));
                   return (
@@ -156,7 +251,7 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                     <Tooltip key={key}>
                       <TooltipTrigger asChild>
                         <div
-                          className="absolute top-0 gold-bar pointer-events-auto cursor-help z-[5]"
+                          className="absolute top-0 gold-bar pointer-events-none z-[5]"
                           style={{
                             left: idx * DAY_WIDTH,
                             width: DAY_WIDTH,
@@ -178,36 +273,67 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                   style={{ left: 0, height: members.length * ROW_HEIGHT }}
                 />
 
-                {members.map((m) => (
-                  <div key={m.id} className="flex border-b border-border/60" style={{ height: ROW_HEIGHT }}>
-                    {days.map((d, i) => {
-                      const busy = isUnavailable(d, m.unavailable_ranges);
-                      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-                      return (
-                        <div
-                          key={i}
-                          className={cn(
-                            "border-r border-background/60",
-                            busy ? "bg-avail-busy" : "bg-avail-free",
-                            isWeekend && "opacity-90",
-                          )}
-                          style={{ width: DAY_WIDTH }}
-                          title={`${m.name} — ${prettyDate(d)}: ${busy ? "Unavailable" : "Available"}`}
-                        />
-                      );
-                    })}
-                  </div>
-                ))}
+                {members.map((m) => {
+                  const isCurrent = m.id === currentMemberId;
+                  const ranges = effectiveRanges(m);
+                  return (
+                    <div key={m.id} className="flex border-b border-border/60" style={{ height: ROW_HEIGHT }}>
+                      {days.map((d, i) => {
+                        const busy = isUnavailable(d, ranges);
+                        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                        const dayKey = ymd(d);
+                        const pendKey = `${m.id}:${dayKey}`;
+                        const isPending = pendingDays.has(pendKey);
+
+                        if (isCurrent) {
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => toggleDay(m, d)}
+                              className={cn(
+                                "border-r border-background/60 transition-opacity hover:opacity-80 cursor-pointer relative z-[6]",
+                                busy ? "bg-avail-busy" : "bg-avail-free",
+                                isWeekend && "opacity-90",
+                                isPending && "animate-pulse",
+                              )}
+                              style={{ width: DAY_WIDTH }}
+                              title={`${m.name} — ${prettyDate(d)}: ${busy ? "Unavailable" : "Available"} (click to toggle)`}
+                              aria-label={`Toggle ${prettyDate(d)} availability`}
+                            />
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={i}
+                            className={cn(
+                              "border-r border-background/60",
+                              busy ? "bg-avail-busy" : "bg-avail-free",
+                              isWeekend && "opacity-90",
+                            )}
+                            style={{ width: DAY_WIDTH }}
+                            title={`${m.name} — ${prettyDate(d)}: ${busy ? "Unavailable" : "Available"}`}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-5 px-4 py-3 border-t border-border bg-muted/30 text-xs text-muted-foreground">
+        <div className="flex items-center gap-5 px-4 py-3 border-t border-border bg-muted/30 text-xs text-muted-foreground flex-wrap">
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-avail-free" /> Available</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-avail-busy" /> Unavailable</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm gold-bar" /> Everyone free</span>
+          {currentMemberId && (
+            <span className="text-foreground/70">Tip: tap a day in your row to flip it.</span>
+          )}
           <span className="ml-auto">Scroll horizontally to see all 6 months →</span>
         </div>
       </div>
