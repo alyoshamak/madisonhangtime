@@ -59,20 +59,6 @@ export const Onboarding = ({ onDone }: { onDone: () => void }) => {
           onSuccess={() => onDone()}
         />
 
-        {members.length > 0 && (
-          <div className="mt-12 pt-8 border-t border-border">
-            <p className="text-sm text-muted-foreground mb-3">
-              Already submitted from another device? Pick your name to jump in:
-            </p>
-            <div className="flex flex-wrap justify-center gap-2">
-              {members.map((m) => (
-                <Button key={m.id} variant="outline" size="sm" onClick={() => claimAs(m.id, m.name)}>
-                  I'm {m.name}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </main>
   );
