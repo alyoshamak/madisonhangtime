@@ -63,7 +63,7 @@ export const Dashboard = ({ onSignOut }: Props) => {
         {/* Header */}
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-4xl font-serif font-semibold">QuarterTime</h1>
+            <h1 className="text-4xl font-serif font-semibold">HangTime</h1>
             <p className="text-muted-foreground mt-1">
               {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
             </p>
@@ -136,7 +136,7 @@ export const Dashboard = ({ onSignOut }: Props) => {
         <AiSummaryCard summary={summary} />
 
         <footer className="text-center text-xs text-muted-foreground py-6">
-          QuarterTime — built for close friends.
+          HangTime — built for close friends.
         </footer>
       </div>
     </main>

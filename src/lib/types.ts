@@ -1,4 +1,4 @@
-/** Shared types for the QuarterTime app. */
+/** Shared types for the HangTime app. */
 
 export type UnavailableRange = {
   start_date: string; // YYYY-MM-DD
