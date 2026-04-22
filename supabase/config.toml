@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.refresh-summary]
 verify_jwt = false
+
+[functions.toggle-day]
+verify_jwt = false
