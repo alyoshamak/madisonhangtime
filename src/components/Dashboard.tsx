@@ -74,7 +74,7 @@ export const Dashboard = ({ onSignOut }: Props) => {
               size="sm"
               onClick={() => {
                 session.clearPassword();
-                session.clearMember();
+                // Keep memberId so this device is recognized on next sign-in.
                 onSignOut();
               }}
             >
