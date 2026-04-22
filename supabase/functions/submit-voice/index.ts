@@ -435,39 +435,45 @@ Always call the record_response tool exactly once.`;
 
     const toolName = isUpdate ? "record_update" : "record_response";
 
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: isUpdate
-                  ? "Here is the update voice note. Only change the parts of the record the speaker explicitly changed."
-                  : "Here is the voice note. Extract the structured response.",
-              },
-              {
-                type: "input_audio",
-                input_audio: {
-                  data: audioBase64,
-                  format: mimeType?.includes("wav") ? "wav" : "mp3",
+    const callAi = async (sysPrompt: string, aiTools: unknown, forcedToolName: string, userText: string) => {
+      return await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [
+            { role: "system", content: sysPrompt },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: userText },
+                {
+                  type: "input_audio",
+                  input_audio: {
+                    data: audioBase64,
+                    format: mimeType?.includes("wav") ? "wav" : "mp3",
+                  },
                 },
-              },
-            ],
-          },
-        ],
-        tools,
-        tool_choice: { type: "function", function: { name: toolName } },
-      }),
-    });
+              ],
+            },
+          ],
+          tools: aiTools,
+          tool_choice: { type: "function", function: { name: forcedToolName } },
+        }),
+      });
+    };
+
+    const aiResp = await callAi(
+      systemPrompt,
+      tools,
+      toolName,
+      isUpdate
+        ? "Here is the update voice note. Only change the parts of the record the speaker explicitly changed."
+        : "Here is the voice note. Extract the structured response.",
+    );
 
     if (!aiResp.ok) {
       const t = await aiResp.text();
