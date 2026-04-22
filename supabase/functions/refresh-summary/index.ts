@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You analyze a small friend group's activity wishes and produce a warm, concise group report. ALWAYS analyze across every person's submissions. Group similar or synonymous activities together (e.g. 'hiking' + 'outdoor walks' + 'nature trails' = one bucket) and rank by how many friends asked for each bucket. Attribute by name." },
+          { role: "system", content: "You analyze a small friend group's activity wishes and produce a warm, concise group report. ALWAYS analyze across every person's submissions. Group similar or synonymous activities together (e.g. 'hiking' + 'outdoor walks' + 'nature trails' = one bucket) and rank by how many friends asked for each bucket. Attribute by name. CRITICAL: Always preserve the specific, evocative wording each friend used — e.g. if Anthony said 'rent a wiffle ball field', write 'rent a wiffle ball field' (NOT 'sports' or 'games'). Generic category labels strip away the personality of each suggestion. Quote distinctive phrases verbatim." },
           { role: "user", content: `Friends and what they want to do:\n${submissions}\n\nProduce the report.` },
         ],
         tools,
