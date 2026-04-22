@@ -34,7 +34,7 @@ export const PasswordGate = ({ onUnlock }: { onUnlock: () => void }) => {
     <main className="min-h-screen flex items-center justify-center px-6 bg-background">
       <div className="w-full max-w-md">
         <div className="text-center mb-10">
-          <h1 className="text-5xl font-serif font-semibold mb-3">QuarterTime</h1>
+          <h1 className="text-5xl font-serif font-semibold mb-3">HangTime</h1>
           <p className="text-muted-foreground">A quiet place to find days that work for everyone.</p>
         </div>
         <form onSubmit={submit} className="bg-card border border-border rounded-2xl p-6 shadow-soft space-y-4">
