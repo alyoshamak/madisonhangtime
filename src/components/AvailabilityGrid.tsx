@@ -19,8 +19,8 @@ import type { Member } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const DAY_WIDTH = 18;       // px per day cell
-const ROW_HEIGHT = 36;      // px per member row
-const NAME_COL_WIDTH = 140; // px
+const ROW_HEIGHT = 44;      // px per member row
+const NAME_COL_WIDTH = 170; // px
 
 type Props = {
   members: Member[];
@@ -93,12 +93,17 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                 key={m.id}
                 style={{ height: ROW_HEIGHT }}
                 className={cn(
-                  "flex items-center px-4 text-sm border-b border-border/60 truncate",
-                  m.id === currentMemberId && "bg-primary/5 font-semibold",
+                  "flex flex-col justify-center px-4 border-b border-border/60 truncate",
+                  m.id === currentMemberId && "bg-primary/5",
                 )}
-                title={m.name}
+                title={`${m.name} — updated ${relativeTime(m.updated_at)}`}
               >
-                {m.name}
+                <div className={cn("text-sm truncate leading-tight", m.id === currentMemberId && "font-semibold")}>
+                  {m.name}
+                </div>
+                <div className="text-[10px] text-muted-foreground leading-tight">
+                  Updated {relativeTime(m.updated_at)}
+                </div>
               </div>
             ))}
           </div>
