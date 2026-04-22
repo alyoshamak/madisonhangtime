@@ -13,7 +13,6 @@ import { toast } from "sonner";
 
 type Props = {
   onSignOut: () => void;
-  onAddNew: () => void;
 };
 
 export const Dashboard = ({ onSignOut, onAddNew }: Props) => {
