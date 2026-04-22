@@ -49,9 +49,9 @@ Deno.serve(async (req) => {
         parameters: {
           type: "object",
           properties: {
-            summary: { type: "string", description: "2-3 sentence warm summary of what the group collectively wants to do, drawing from EVERY person's submissions." },
-            top_recommendation: { type: "string", description: "The most popular recommendations across the whole group, ranked by how many friends mentioned similar/synonymous activities. Format as a short markdown-free list, one per line, like: '1. Outdoor hikes — mentioned by Alyosha, Maya, Jordan (3 of 5)\\n2. Concerts — mentioned by Sam, Priya (2 of 5)'. Include 2–4 entries when the group is large enough; if only one person has submitted, list their top picks attributed to them." },
-            unique_pick: { type: "string", description: "The single most distinctive suggestion with who proposed it (e.g. 'Wildcard: pottery night — suggested by Jordan')." },
+            summary: { type: "string", description: "2-3 sentence warm summary of what the group collectively wants to do, drawing from EVERY person's submissions. Reference specific suggestions verbatim where they add color (e.g. 'renting a wiffle ball field') instead of generic categories." },
+            top_recommendation: { type: "string", description: "The most popular recommendations across the whole group, ranked by how many friends mentioned similar/synonymous activities. CRITICAL: Preserve each person's specific, evocative wording verbatim — e.g. 'rent a wiffle ball field', 'pottery night at the studio', 'sunrise hike at Devil's Lake'. NEVER collapse specifics into generic categories like 'sports', 'games', or 'outdoors'. If grouping similar suggestions, list each person's exact phrasing in parentheses. Format as a short markdown-free numbered list, one per line, like: '1. Outdoor adventures — Alyosha (sunrise hike at Devil's Lake), Maya (kayaking the Wisconsin River) (2 of 5)\\n2. Wiffle ball field rental — Anthony (1 of 5)'. Include 2–4 entries when the group is large enough; if only one person has submitted, list THEIR exact suggestions verbatim, attributed to them — do not generalize." },
+            unique_pick: { type: "string", description: "The single most distinctive suggestion with who proposed it, using their exact wording (e.g. 'Wildcard: rent a wiffle ball field — suggested by Anthony'). Never genericize." },
           },
           required: ["summary", "top_recommendation", "unique_pick"],
           additionalProperties: false,
