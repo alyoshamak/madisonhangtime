@@ -160,6 +160,119 @@ const applyActivityChanges = (existingActivities: any, changes: any[]) => {
   return [...next.values()];
 };
 
+type ExistingMemberLite = {
+  id: string;
+  name: string;
+  unavailable_ranges: any;
+  activities: any;
+};
+
+const normalizeName = (value: string) =>
+  value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, "")
+    .trim();
+
+const levenshtein = (a: string, b: string) => {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let curr = i;
+    let prevDiag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const temp = prev[j];
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr = Math.min(prev[j] + 1, prev[j - 1] + 1, prevDiag + cost);
+      prevDiag = temp;
+      prev[j] = curr;
+    }
+  }
+  return prev[b.length];
+};
+
+const findLocalNameMatch = (spokenName: string, members: ExistingMemberLite[]) => {
+  const target = normalizeName(spokenName);
+  if (!target) return null;
+  const targetFirst = target.split(" ")[0];
+
+  for (const m of members) {
+    const candidate = normalizeName(m.name);
+    if (!candidate) continue;
+    if (candidate === target) return m;
+    const candidateFirst = candidate.split(" ")[0];
+    if (candidateFirst && candidateFirst === targetFirst) return m;
+  }
+
+  // Fuzzy: small edit distance on first-name token (handles Madison/Madyson, Jen/Jenn).
+  let best: { member: ExistingMemberLite; distance: number } | null = null;
+  for (const m of members) {
+    const candidateFirst = normalizeName(m.name).split(" ")[0];
+    if (!candidateFirst) continue;
+    const dist = levenshtein(candidateFirst, targetFirst);
+    const maxLen = Math.max(candidateFirst.length, targetFirst.length);
+    const threshold = maxLen <= 4 ? 1 : 2;
+    if (dist <= threshold && (!best || dist < best.distance)) {
+      best = { member: m, distance: dist };
+    }
+  }
+  return best?.member ?? null;
+};
+
+const findMatchingMember = async (
+  spokenName: string,
+  members: ExistingMemberLite[],
+): Promise<ExistingMemberLite | null> => {
+  if (!members.length) return null;
+
+  const local = findLocalNameMatch(spokenName, members);
+  if (local) return local;
+
+  // AI fallback: ask the model whether the spoken name refers to any existing person
+  // (handles nicknames like "Maddie" -> "Madison").
+  try {
+    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash-lite",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You decide whether a spoken name refers to one of the existing people in a small group of close friends. Match obvious nicknames and spelling variants (e.g. Maddie/Madison, Jen/Jennifer, Bobby/Robert). If unsure, say no match.",
+          },
+          {
+            role: "user",
+            content: `Spoken name: ${JSON.stringify(spokenName)}\nExisting people:\n${members
+              .map((m) => `- id=${m.id} name=${JSON.stringify(m.name)}`)
+              .join("\n")}\n\nReturn JSON: {"match_id": "<id or null>"}.`,
+          },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    const content = json.choices?.[0]?.message?.content;
+    if (!content) return null;
+    const parsed = JSON.parse(content);
+    const matchId = parsed?.match_id;
+    if (!matchId || matchId === "null") return null;
+    return members.find((m) => m.id === matchId) ?? null;
+  } catch (e) {
+    console.error("AI name match failed", e);
+    return null;
+  }
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -466,25 +579,36 @@ Always call the record_response tool exactly once.`;
       .map((activity: string) => String(activity).trim())
       .filter(Boolean);
 
-    const payload = {
-      name,
-      unavailable_ranges: ranges,
-      activities,
-      raw_transcript: args.transcript ?? null,
-      updated_at: new Date().toISOString(),
-    };
+    // Load all existing members so we can match against spelling variations / nicknames
+    // and never create a duplicate row for the same person.
+    const { data: allMembers } = await supabase
+      .from("members")
+      .select("id, name, unavailable_ranges, activities");
+
+    const matchedMember = await findMatchingMember(name, allMembers ?? []);
 
     let memberId: string | undefined;
+    let finalName = name;
 
-    const { data: existing } = await supabase
-      .from("members")
-      .select("id")
-      .ilike("name", name)
-      .maybeSingle();
-
-    if (existing?.id) {
-      memberId = existing.id;
-      const { error } = await supabase.from("members").update(payload).eq("id", memberId);
+    if (matchedMember) {
+      // Treat as an update to the existing person — preserve prior data, keep their stored name.
+      memberId = matchedMember.id;
+      finalName = matchedMember.name;
+      const mergedUnavailable = mergeRanges([
+        ...normalizeExistingRanges(matchedMember.unavailable_ranges),
+        ...ranges,
+      ]);
+      const mergedActivities = applyActivityChanges(
+        matchedMember.activities,
+        activities.map((activity) => ({ action: "add", activity })),
+      );
+      const updatePayload = {
+        unavailable_ranges: mergedUnavailable,
+        activities: mergedActivities,
+        raw_transcript: args.transcript ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabase.from("members").update(updatePayload).eq("id", memberId);
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), {
           status: 500,
@@ -492,7 +616,14 @@ Always call the record_response tool exactly once.`;
         });
       }
     } else {
-      const { data, error } = await supabase.from("members").insert(payload).select("id").single();
+      const insertPayload = {
+        name,
+        unavailable_ranges: ranges,
+        activities,
+        raw_transcript: args.transcript ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabase.from("members").insert(insertPayload).select("id").single();
       if (error) {
         return new Response(JSON.stringify({ error: error.message }), {
           status: 500,
@@ -521,7 +652,8 @@ Always call the record_response tool exactly once.`;
       JSON.stringify({
         ok: true,
         memberId,
-        name,
+        name: finalName,
+        merged_with_existing: !!matchedMember,
         unavailable_ranges: ranges,
         activities,
       }),
