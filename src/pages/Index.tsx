@@ -39,8 +39,16 @@ const Index = () => {
   }
   if (stage === "gate") {
     return <PasswordGate onUnlock={async () => {
-      const { count } = await supabase.from("members").select("*", { count: "exact", head: true });
-      setStage((count ?? 0) === 0 ? "onboarding" : "dashboard");
+      const memberId = session.getMemberId();
+      if (memberId) {
+        const { data } = await supabase.from("members").select("id").eq("id", memberId).maybeSingle();
+        if (data) {
+          setStage("dashboard");
+          return;
+        }
+        session.clearMember();
+      }
+      setStage("onboarding");
     }} />;
   }
   if (stage === "onboarding") {
