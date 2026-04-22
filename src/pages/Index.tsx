@@ -17,21 +17,19 @@ const Index = () => {
         setStage("gate");
         return;
       }
-      // If they have a password but no claimed identity, check whether anyone has submitted yet.
+      // If this device already submitted, skip onboarding and go straight to the dashboard.
       const memberId = session.getMemberId();
       if (memberId) {
-        // Verify the member still exists
         const { data } = await supabase.from("members").select("id").eq("id", memberId).maybeSingle();
         if (data) {
           setStage("dashboard");
           return;
         }
+        // Member was deleted upstream — clear stale identity and fall through.
         session.clearMember();
       }
-      // No identity yet — show onboarding only if they're literally the first / haven't submitted.
-      // But others may have already submitted, so still go to dashboard with "claim" flow available.
-      const { count } = await supabase.from("members").select("*", { count: "exact", head: true });
-      setStage((count ?? 0) === 0 ? "onboarding" : "dashboard");
+      // No identity on this device yet — show the onboarding/record flow.
+      setStage("onboarding");
     };
     init();
   }, []);
@@ -41,8 +39,16 @@ const Index = () => {
   }
   if (stage === "gate") {
     return <PasswordGate onUnlock={async () => {
-      const { count } = await supabase.from("members").select("*", { count: "exact", head: true });
-      setStage((count ?? 0) === 0 ? "onboarding" : "dashboard");
+      const memberId = session.getMemberId();
+      if (memberId) {
+        const { data } = await supabase.from("members").select("id").eq("id", memberId).maybeSingle();
+        if (data) {
+          setStage("dashboard");
+          return;
+        }
+        session.clearMember();
+      }
+      setStage("onboarding");
     }} />;
   }
   if (stage === "onboarding") {
