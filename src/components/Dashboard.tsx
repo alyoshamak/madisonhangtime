@@ -102,7 +102,7 @@ export const Dashboard = ({ onSignOut }: Props) => {
         {currentMember ? (
           <section className="rounded-2xl border border-border bg-card p-5 shadow-soft flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="flex-1">
-              <div className="text-sm font-semibold">Update your availability, {currentMember.name}</div>
+              <div className="text-sm font-semibold">Update availability and activity preferences, {currentMember.name}</div>
               <div className="text-sm text-muted-foreground">Tap the mic and tell us what's changed. We'll update your previous responses.</div>
             </div>
             <VoiceCapture
