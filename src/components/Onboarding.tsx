@@ -1,8 +1,32 @@
+import { useEffect, useState } from "react";
 import { VoiceCapture } from "./VoiceCapture";
+import { supabase } from "@/integrations/supabase/client";
+import { session } from "@/lib/session";
+import { Button } from "@/components/ui/button";
+import type { Member } from "@/lib/types";
 
 export const Onboarding = ({ onDone }: { onDone: () => void }) => {
+  const [members, setMembers] = useState<Member[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("members")
+        .select("*")
+        .order("created_at", { ascending: true });
+      if (!cancelled && data) setMembers(data as Member[]);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const claimAs = (id: string, name: string) => {
+    session.setMember(id, name);
+    onDone();
+  };
+
   return (
-    <main className="min-h-screen flex items-center justify-center px-6 bg-background">
+    <main className="min-h-screen flex items-center justify-center px-6 py-10 bg-background">
       <div className="w-full max-w-xl text-center">
         <div className="mb-12">
           <h1 className="text-4xl md:text-5xl font-serif font-semibold mb-4">Let's hear from you</h1>
@@ -34,6 +58,21 @@ export const Onboarding = ({ onDone }: { onDone: () => void }) => {
           helperText="Tap the mic to start, tap again to finish. We'll handle the rest."
           onSuccess={() => onDone()}
         />
+
+        {members.length > 0 && (
+          <div className="mt-12 pt-8 border-t border-border">
+            <p className="text-sm text-muted-foreground mb-3">
+              Already submitted from another device? Pick your name to jump in:
+            </p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {members.map((m) => (
+                <Button key={m.id} variant="outline" size="sm" onClick={() => claimAs(m.id, m.name)}>
+                  I'm {m.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
