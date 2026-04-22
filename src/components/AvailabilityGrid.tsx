@@ -156,7 +156,7 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                     <Tooltip key={key}>
                       <TooltipTrigger asChild>
                         <div
-                          className="absolute top-0 gold-bar pointer-events-auto cursor-help"
+                          className="absolute top-0 gold-bar pointer-events-auto cursor-help z-[5]"
                           style={{
                             left: idx * DAY_WIDTH,
                             width: DAY_WIDTH,
