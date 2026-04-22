@@ -8,15 +8,14 @@ import { OverlapCallout } from "@/components/OverlapCallout";
 import { AiSummaryCard } from "@/components/AiSummaryCard";
 import { VoiceCapture } from "@/components/VoiceCapture";
 import { Button } from "@/components/ui/button";
-import { LogOut, Plus } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { toast } from "sonner";
 
 type Props = {
   onSignOut: () => void;
-  onAddNew: () => void;
 };
 
-export const Dashboard = ({ onSignOut, onAddNew }: Props) => {
+export const Dashboard = ({ onSignOut }: Props) => {
   const [members, setMembers] = useState<Member[]>([]);
   const [summary, setSummary] = useState<AiSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,10 +69,6 @@ export const Dashboard = ({ onSignOut, onAddNew }: Props) => {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={onAddNew}>
-              <Plus className="h-4 w-4" />
-              Add another friend
-            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -89,42 +84,19 @@ export const Dashboard = ({ onSignOut, onAddNew }: Props) => {
           </div>
         </header>
 
-        {/* Friends list with last-updated and identity claim */}
-        <section className="rounded-2xl border border-border bg-card p-6 shadow-soft">
-          <h2 className="text-lg font-semibold mb-4">Who's submitted ({members.length})</h2>
-          {loading ? (
-            <p className="text-muted-foreground">Loading…</p>
-          ) : members.length === 0 ? (
-            <p className="text-muted-foreground">No responses yet — be the first!</p>
-          ) : (
-            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {members.map((m) => {
-                const isMe = m.id === currentMemberId;
-                return (
-                  <li
-                    key={m.id}
-                    className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 ${
-                      isMe ? "border-primary/40 bg-primary/5" : "border-border bg-background"
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium truncate flex items-center gap-2">
-                        {m.name}
-                        {isMe && <span className="text-[10px] uppercase tracking-wide text-primary font-semibold">you</span>}
-                      </div>
-                      <div className="text-xs text-muted-foreground">Updated {relativeTime(m.updated_at)}</div>
-                    </div>
-                    {!currentMemberId && (
-                      <Button variant="ghost" size="sm" onClick={() => claimAs(m.id, m.name)}>
-                        That's me
-                      </Button>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+        {/* Identity claim — only shown when current device hasn't been linked yet */}
+        {!currentMemberId && members.length > 0 && (
+          <section className="rounded-2xl border border-dashed border-border bg-card/60 p-4 shadow-soft">
+            <div className="text-sm font-semibold mb-2">Are you one of these friends?</div>
+            <div className="flex flex-wrap gap-2">
+              {members.map((m) => (
+                <Button key={m.id} variant="outline" size="sm" onClick={() => claimAs(m.id, m.name)}>
+                  I'm {m.name}
+                </Button>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Update / Add controls */}
         {currentMember ? (
