@@ -1,29 +1,6 @@
-import { useEffect, useState } from "react";
 import { VoiceCapture } from "./VoiceCapture";
-import { supabase } from "@/integrations/supabase/client";
-import { session } from "@/lib/session";
-import { Button } from "@/components/ui/button";
-import type { Member } from "@/lib/types";
 
 export const Onboarding = ({ onDone }: { onDone: () => void }) => {
-  const [members, setMembers] = useState<Member[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from("members")
-        .select("*")
-        .order("created_at", { ascending: true });
-      if (!cancelled && data) setMembers(data as Member[]);
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const claimAs = (id: string, name: string) => {
-    session.setMember(id, name);
-    onDone();
-  };
 
   return (
     <main className="min-h-screen flex items-center justify-center px-6 py-10 bg-background">
