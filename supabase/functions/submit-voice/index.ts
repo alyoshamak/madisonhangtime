@@ -338,7 +338,7 @@ Today is ${windowStart}. The planning window runs through ${windowEnd} (~6 month
 The speaker will state: their name, stretches of days they are NOT available within this 6-month window, and activities they would enjoy doing with friends.
 Convert any relative dates (e.g. "next weekend", "the second week of June", "Christmas week", "all of August") into concrete YYYY-MM-DD start/end dates within the window. If a year isn't given, infer the nearest future occurrence within the window.
 Each unavailable range must have inclusive start_date and end_date. Single days have start_date == end_date.
-Activities should be short noun phrases (e.g. "outdoor hikes", "pottery night", "concerts").
+Activities should preserve the speaker's specific, evocative wording — e.g. "rent a wiffle ball field", "pottery night at the studio", "sunrise hike at Devil's Lake". Do NOT collapse specific suggestions into generic categories like "sports" or "games"; the specific phrasing is what makes the suggestion personal.
 Always call the record_response tool exactly once.`;
 
     const rangeItemSchema = {
