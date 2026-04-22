@@ -8,7 +8,7 @@ import { OverlapCallout } from "@/components/OverlapCallout";
 import { AiSummaryCard } from "@/components/AiSummaryCard";
 import { VoiceCapture } from "@/components/VoiceCapture";
 import { Button } from "@/components/ui/button";
-import { LogOut, Plus } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { toast } from "sonner";
 
 type Props = {

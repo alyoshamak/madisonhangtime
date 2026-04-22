@@ -48,12 +48,7 @@ const Index = () => {
   if (stage === "onboarding") {
     return <Onboarding onDone={() => setStage("dashboard")} />;
   }
-  return (
-    <Dashboard
-      onSignOut={() => setStage("gate")}
-      onAddNew={() => setStage("onboarding")}
-    />
-  );
+  return <Dashboard onSignOut={() => setStage("gate")} />;
 };
 
 export default Index;
