@@ -34,9 +34,9 @@ export const AiSummaryCard = ({ summary }: { summary: AiSummary | null }) => {
           <div className="rounded-xl border border-border bg-secondary/40 p-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground mb-1.5">
               <Star className="h-4 w-4 text-primary" />
-              Top recommendation
+              Most popular recommendations
             </div>
-            <p className="text-foreground/90">{summary.top_recommendation}</p>
+            <p className="text-foreground/90 whitespace-pre-line">{summary.top_recommendation}</p>
           </div>
         )}
         {summary.unique_pick && (
