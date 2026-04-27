@@ -245,7 +245,7 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
 
               {/* Member rows */}
               <div className="relative">
-                {/* Gold overlap bars (absolute, span full height of all rows) */}
+                {/* Gold overlap bars (one segment per row so horizontal grid lines show through) */}
                 {[...overlapDays].map((key) => {
                   const idx = days.findIndex((d) => ymd(d) === key);
                   if (idx < 0) return null;
@@ -254,15 +254,28 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                     <Tooltip key={key}>
                       <TooltipTrigger asChild>
                         <div
-                          className="absolute top-0 gold-bar pointer-events-none z-[5]"
+                          className="absolute top-0 pointer-events-none z-[5]"
                           style={{
                             left: idx * DAY_WIDTH,
-                            width: DAY_WIDTH - 1,
+                            width: DAY_WIDTH,
                             height: members.length * ROW_HEIGHT,
-                            borderRight: "1px solid hsl(var(--background))",
                           }}
                           aria-label={`Everyone free — ${prettyDate(date)}`}
-                        />
+                        >
+                          {members.map((_, rowIdx) => (
+                            <div
+                              key={rowIdx}
+                              className="gold-bar"
+                              style={{
+                                position: "absolute",
+                                top: rowIdx * ROW_HEIGHT,
+                                left: 0,
+                                width: DAY_WIDTH - 1,
+                                height: ROW_HEIGHT - 1,
+                              }}
+                            />
+                          ))}
+                        </div>
                       </TooltipTrigger>
                       <TooltipContent>
                         <span className="font-medium">Everyone free</span> — {prettyDate(date)}
