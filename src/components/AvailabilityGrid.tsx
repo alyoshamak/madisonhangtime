@@ -257,8 +257,9 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                           className="absolute top-0 gold-bar pointer-events-none z-[5]"
                           style={{
                             left: idx * DAY_WIDTH,
-                            width: DAY_WIDTH,
+                            width: DAY_WIDTH - 1,
                             height: members.length * ROW_HEIGHT,
+                            borderRight: "1px solid hsl(var(--background))",
                           }}
                           aria-label={`Everyone free — ${prettyDate(date)}`}
                         />
