@@ -185,22 +185,27 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
               Friends
             </div>
             {members.map((m) => (
-              <div
-                key={m.id}
-                style={{ height: ROW_HEIGHT }}
-                className={cn(
-                  "flex flex-col justify-center px-4 border-b border-border/60 truncate",
-                  m.id === currentMemberId && "bg-primary/5",
-                )}
-                title={`${m.name} — updated ${relativeTime(m.updated_at)}`}
-              >
-                <div className={cn("text-sm truncate leading-tight", m.id === currentMemberId && "font-semibold")}>
-                  {m.name}
-                </div>
-                <div className="text-[10px] text-muted-foreground leading-tight">
-                  Updated {relativeTime(m.updated_at)}
-                </div>
-              </div>
+              {(() => {
+                const hasEntered = m.updated_at !== m.created_at;
+                return (
+                  <div
+                    key={m.id}
+                    style={{ height: ROW_HEIGHT }}
+                    className={cn(
+                      "flex flex-col justify-center px-4 border-b border-border/60 truncate",
+                      m.id === currentMemberId && "bg-primary/5",
+                    )}
+                    title={hasEntered ? `${m.name} — updated ${relativeTime(m.updated_at)}` : `${m.name} — hasn't entered availability yet`}
+                  >
+                    <div className={cn("text-sm truncate leading-tight", m.id === currentMemberId && "font-semibold")}>
+                      {m.name}
+                    </div>
+                    <div className={cn("text-[10px] leading-tight", hasEntered ? "text-muted-foreground" : "text-muted-foreground/70 italic")}>
+                      {hasEntered ? `Updated ${relativeTime(m.updated_at)}` : "Not entered yet"}
+                    </div>
+                  </div>
+                );
+              })()}
             ))}
           </div>
 
