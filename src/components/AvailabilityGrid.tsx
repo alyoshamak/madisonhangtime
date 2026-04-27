@@ -20,9 +20,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { session } from "@/lib/session";
 import { toast } from "sonner";
 
-const DAY_WIDTH = 18;       // px per day cell
+const DAY_WIDTH = 22;       // px per day cell
 const ROW_HEIGHT = 44;      // px per member row
-const NAME_COL_WIDTH = 170; // px
+const NAME_COL_WIDTH = 120; // px
 
 type Props = {
   members: Member[];
