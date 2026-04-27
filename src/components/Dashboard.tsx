@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Member, AiSummary } from "@/lib/types";
 import { session } from "@/lib/session";
-import { relativeTime } from "@/lib/dates";
 import { AvailabilityGrid } from "@/components/AvailabilityGrid";
 import { OverlapCallout } from "@/components/OverlapCallout";
 import { AiSummaryCard } from "@/components/AiSummaryCard";
@@ -19,7 +18,7 @@ export const Dashboard = ({ onSignOut }: Props) => {
   const [members, setMembers] = useState<Member[]>([]);
   const [summary, setSummary] = useState<AiSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentMemberId, setCurrentMemberId] = useState<string | null>(session.getMemberId());
+  const [currentMemberId] = useState<string | null>(session.getMemberId());
 
   const load = async () => {
     const [m, s] = await Promise.all([
@@ -51,12 +50,6 @@ export const Dashboard = ({ onSignOut }: Props) => {
 
   const currentMember = members.find((m) => m.id === currentMemberId) || null;
 
-  const claimAs = (id: string, name: string) => {
-    session.setMember(id, name);
-    setCurrentMemberId(id);
-    toast.success(`Welcome back, ${name}`);
-  };
-
   return (
     <main className="min-h-screen bg-background">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
@@ -84,26 +77,12 @@ export const Dashboard = ({ onSignOut }: Props) => {
           </div>
         </header>
 
-        {/* Identity claim — only shown when current device hasn't been linked yet */}
-        {!currentMemberId && members.length > 0 && (
-          <section className="rounded-2xl border border-dashed border-border bg-card/60 p-4 shadow-soft">
-            <div className="text-sm font-semibold mb-2">Are you one of these friends?</div>
-            <div className="flex flex-wrap gap-2">
-              {members.map((m) => (
-                <Button key={m.id} variant="outline" size="sm" onClick={() => claimAs(m.id, m.name)}>
-                  I'm {m.name}
-                </Button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Update / Add controls */}
-        {currentMember ? (
+        {/* Voice update card — optional alternative to tapping the grid */}
+        {currentMember && (
           <section className="rounded-2xl border border-border bg-card p-5 shadow-soft flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="flex-1">
               <div className="text-sm font-semibold">Update availability and activity preferences, {currentMember.name}</div>
-              <div className="text-sm text-muted-foreground">Tap the mic and tell us what's changed. We'll update your previous responses.</div>
+              <div className="text-sm text-muted-foreground">Prefer to talk? Tap the mic and tell us what's changed — we'll update your previous responses.</div>
             </div>
             <VoiceCapture
               size="sm"
@@ -111,23 +90,16 @@ export const Dashboard = ({ onSignOut }: Props) => {
               helperText="Tap to update"
             />
           </section>
-        ) : (
-          <section className="rounded-2xl border border-dashed border-border bg-card/50 p-5 shadow-soft flex flex-col sm:flex-row sm:items-center gap-4">
-            <div className="flex-1">
-              <div className="text-sm font-semibold">Haven't submitted yet?</div>
-              <div className="text-sm text-muted-foreground">Tap the mic to record your name, unavailable stretches, and activities you'd enjoy.</div>
-            </div>
-            <VoiceCapture
-              size="sm"
-              helperText="Tap to record"
-              onSuccess={({ memberId }) => setCurrentMemberId(memberId)}
-            />
-          </section>
         )}
 
         {/* Calendar */}
         <section className="space-y-3">
           <h2 className="text-2xl font-serif font-semibold">The next 6 months</h2>
+          {currentMember && (
+            <p className="text-base text-foreground/80">
+              👇 Tap the dates next to <span className="font-semibold">{currentMember.name}</span> that you're <strong>not</strong> available. Or use the mic above to speak your updates.
+            </p>
+          )}
           <AvailabilityGrid members={members} currentMemberId={currentMemberId} />
         </section>
 

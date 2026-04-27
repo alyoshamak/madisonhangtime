@@ -1,62 +1,51 @@
+# Simplify onboarding to a name picker
 
-## QuarterTime — a coordination app for a small group of friends
+## Goal
+Friends shouldn't have to use voice on first entry. After the password screen, they pick their name from a list and land on the dashboard. From there they can either **tap days in their row** OR **use the mic** to update.
 
-A simple, voice-first web app where you and your friends record availability and activity preferences, then see overlap on a shared 6-month calendar.
+## Changes
 
----
+### 1. Seed the 3 missing members (DB migration)
+The `members` table currently has Alyosha, Anthony, Nick, Tyler. Add Eric, Jakob, Alex with empty `unavailable_ranges` and `activities` so they appear in the picker and on the grid immediately.
 
-### 1. Gate screen (shared password)
-- Single full-screen card: "Enter the group password."
-- One password protects entry to the whole app. Stored as a hashed value server-side; verified through an edge function so the secret never ships to the browser.
-- After unlock, the device remembers the session locally so friends don't re-enter it each visit.
+```sql
+INSERT INTO public.members (name, unavailable_ranges, activities)
+VALUES ('Eric', '[]'::jsonb, '[]'::jsonb),
+       ('Jakob', '[]'::jsonb, '[]'::jsonb),
+       ('Alex', '[]'::jsonb, '[]'::jsonb);
+```
+(Plain inserts — no unique constraint exists on `name`, and these three names aren't in the table.)
 
-### 2. Voice onboarding (first visit)
-- Big mic button center-screen with helper text:
-  > "Tap and tell us: your name, the stretches of days you are NOT available over the next 6 months, and the kinds of activities you'd like to do together."
-- Tap to record → tap to stop. We transcribe and an AI extracts:
-  - **Name**
-  - **Unavailable date ranges** (parsed into start/end dates within the 6-month window)
-  - **Activity preferences** (a list of interests)
-- Auto-saves silently (no review step) and drops the user straight into the dashboard. A subtle toast confirms "Saved — welcome, {name}".
+### 2. Rewrite `src/components/Onboarding.tsx` — name picker
+- Fetch all members from `public.members` (already publicly readable).
+- Render a card titled **"Who are you?"** with one tappable button per friend (all 7 names).
+- On click: `session.setMember(id, name)` then call `onDone()` to drop into the dashboard.
+- Remove `VoiceCapture` and the 3-step instructions from this screen entirely.
+- Small footer link: *"Not on the list? Ask the group to add you."* (no action — just guidance).
 
-### 3. Dashboard
-The single main screen. Sections top-to-bottom:
+### 3. Update `src/components/Dashboard.tsx`
+- **Add prominent help text** above the calendar:
+  > 👇 Tap the dates next to your name that you're **not** available. Or use the mic below to speak your updates.
+- **Keep the existing voice update card** ("Update availability and activity preferences, NAME") — unchanged, still uses `VoiceCapture` in update mode.
+- **Remove the "Are you one of these friends?" identity-claim section** — no longer needed since onboarding handles identity.
+- **Remove the "Haven't submitted yet?" fallback section** — every visitor now has a `currentMemberId` after onboarding.
 
-**a. Header**
-- App title, today's date, and a small list of who has submitted with each person's "last updated" timestamp (e.g. "Maya — updated 2 days ago").
+### 4. Availability grid (`AvailabilityGrid.tsx`) — minor polish only
+- Already shows **"Updated X ago"** under each name ✅ — keep as-is.
+- Already supports tap-to-toggle for the current user's row ✅.
+- Strengthen the legend tip from *"Tip: tap a day in your row to flip it."* to **"👆 Tap any day in your row to flip green ↔ red."** so it's unmistakable.
 
-**b. Availability grid (the centerpiece)**
-- Left column: each friend's name (rows added as new people submit).
-- Right side: a horizontally scrollable strip of every day across the next ~6 months, grouped visually by week and labeled by month.
-- Each cell:
-  - **Green** = that person is available
-  - **Red** = that person is unavailable
-- **Gold vertical bar** spans the full column on any day where *everyone who has submitted* is available — these are the "go" days.
-- Sticky name column on scroll; today is marked with a thin marker line.
-- Hovering/tapping a gold day shows a tooltip: "Everyone free — {date}".
+## Flow after changes
+1. Password screen → enter group password.
+2. **Name picker** → tap your name.
+3. Dashboard → tap days in your row to toggle availability, or tap the mic to dictate updates. Last-updated time stays visible next to every name.
 
-**c. "Update my response" row**
-- Next to the current user's name, a mic icon with helper text:
-  > "Tap to update your availability or activity preferences."
-- Same voice flow as onboarding; AI merges the new info into their existing record (replaces unavailable ranges + activity list) and bumps their "last updated."
+## Files touched
+- New migration to seed Eric, Jakob, Alex
+- `src/components/Onboarding.tsx` (rewrite)
+- `src/components/Dashboard.tsx` (remove claim/fallback sections, add help text)
+- `src/components/AvailabilityGrid.tsx` (legend text tweak)
 
-**d. Overlap callout**
-- A prominent card under the calendar listing the next handful of fully-overlapping days (the gold ones), with quick-glance day-of-week + date.
-- If none exist yet: "No fully overlapping days yet — more responses needed."
-
-**e. AI activity summary (bottom)**
-- An AI-generated paragraph summarizing what the group collectively wants to do.
-- **Top recommendation**: the activity with the most volume + similarity across submissions (e.g. "Outdoor hikes — 4 of 5 of you mentioned this").
-- **Most unique pick**: a callout highlighting the most distinctive activity someone suggested (e.g. "Wildcard: pottery night — suggested by Jordan").
-- Recomputes whenever someone submits or updates.
-
----
-
-### How it works behind the scenes
-- **Backend**: Lovable Cloud stores the shared password hash, member records (name, unavailable ranges, activities, last_updated), and a cached AI summary.
-- **Voice**: browser records audio → edge function transcribes via Lovable AI → second AI call extracts structured fields (name, date ranges, activities) using tool calling → saved to DB.
-- **AI summary**: edge function aggregates all members' activity lists and asks the AI for {summary, top_recommendation, unique_pick}.
-- **No accounts** — identity is just the name from your voice intro, tied to this device. Re-recording from the same device updates your existing entry; from a new device you'd pick your name from the list to claim it.
-
-### Design direction
-- Warm, calm, low-chrome. Soft neutral background, friendly serif or rounded-sans display for headings, clean sans for body. The availability grid is the hero — generous whitespace around it, gold bars feel celebratory when they appear.
+## Notes
+- Device persistence still works: once someone picks their name, `session.setMember` stores it in localStorage so they skip the picker next visit (until they sign out, which only clears the password).
+- If a friend signs in on a new device, they'll see the picker again and just re-select their name — same row, no duplicate.
