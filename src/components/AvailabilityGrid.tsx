@@ -332,7 +332,7 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-avail-busy" /> Unavailable</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm gold-bar" /> Everyone free</span>
           {currentMemberId && (
-            <span className="text-foreground/70">Tip: tap a day in your row to flip it.</span>
+            <span className="text-foreground/80 font-medium">👆 Tap any day in your row to flip green ↔ red.</span>
           )}
           <span className="ml-auto">Scroll horizontally to see all 6 months →</span>
         </div>
