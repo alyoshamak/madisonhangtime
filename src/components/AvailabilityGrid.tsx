@@ -376,6 +376,7 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
         <div className="flex items-center gap-5 px-4 py-3 border-t border-border bg-muted/30 text-xs text-muted-foreground flex-wrap">
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-avail-free" /> Available</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-avail-busy" /> Unavailable</span>
+          <span className="flex items-center gap-1.5"><span className="inline-flex h-3 w-3 rounded-sm bg-avail-busy items-center justify-center text-white font-extrabold text-[10px] leading-none">!</span> Only blocker</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm gold-bar" /> Everyone free</span>
           {currentMemberId && (
             <span className="text-foreground/80 font-medium">👆 Tap any day in your row to flip green ↔ red.</span>
