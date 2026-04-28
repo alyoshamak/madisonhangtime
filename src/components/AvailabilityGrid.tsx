@@ -302,6 +302,15 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                         const pendKey = `${m.id}:${dayKey}`;
                         const isPending = pendingDays.has(pendKey);
 
+                        // Is this person the ONLY blocker (everyone else free)?
+                        const isSoleBlocker =
+                          busy &&
+                          members.length > 1 &&
+                          members.every(
+                            (other) =>
+                              other.id === m.id || !isUnavailable(d, effectiveRanges(other)),
+                          );
+
                         if (isCurrent) {
                           return (
                             <button
@@ -310,15 +319,25 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                               disabled={isPending}
                               onClick={() => toggleDay(m, d)}
                               className={cn(
-                                "border-r border-background/60 transition-opacity hover:opacity-80 cursor-pointer relative z-[1]",
+                                "border-r border-background/60 transition-opacity hover:opacity-80 cursor-pointer relative z-[1] flex items-center justify-center",
                                 busy ? "bg-avail-busy" : "bg-avail-free",
                                 isWeekend && "opacity-90",
                                 isPending && "animate-pulse",
                               )}
                               style={{ width: DAY_WIDTH }}
-                              title={`${m.name} — ${prettyDate(d)}: ${busy ? "Unavailable" : "Available"} (click to toggle)`}
+                              title={
+                                isSoleBlocker
+                                  ? `${m.name} — ${prettyDate(d)}: You're the only one blocking this day! (click to free up)`
+                                  : `${m.name} — ${prettyDate(d)}: ${busy ? "Unavailable" : "Available"} (click to toggle)`
+                              }
                               aria-label={`Toggle ${prettyDate(d)} availability`}
-                            />
+                            >
+                              {isSoleBlocker && (
+                                <span className="text-white font-extrabold text-[14px] leading-none drop-shadow-[0_0_2px_rgba(0,0,0,0.6)] pointer-events-none">
+                                  !
+                                </span>
+                              )}
+                            </button>
                           );
                         }
 
@@ -326,13 +345,23 @@ export const AvailabilityGrid = ({ members, currentMemberId, daysCount = 183 }: 
                           <div
                             key={i}
                             className={cn(
-                              "border-r border-background/60",
+                              "border-r border-background/60 flex items-center justify-center",
                               busy ? "bg-avail-busy" : "bg-avail-free",
                               isWeekend && "opacity-90",
                             )}
                             style={{ width: DAY_WIDTH }}
-                            title={`${m.name} — ${prettyDate(d)}: ${busy ? "Unavailable" : "Available"}`}
-                          />
+                            title={
+                              isSoleBlocker
+                                ? `${m.name} — ${prettyDate(d)}: Only person blocking this day`
+                                : `${m.name} — ${prettyDate(d)}: ${busy ? "Unavailable" : "Available"}`
+                            }
+                          >
+                            {isSoleBlocker && (
+                              <span className="text-white font-extrabold text-[14px] leading-none drop-shadow-[0_0_2px_rgba(0,0,0,0.6)]">
+                                !
+                              </span>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
